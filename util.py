@@ -29,6 +29,7 @@ def create_parser():
     parser.add_argument("--ports", action='store_true', help="Use port numberings in GNN training")
     parser.add_argument("--tds", action='store_true', help="Use time deltas (i.e. the time between subsequent transactions) in GNN training")
     parser.add_argument("--ego", action='store_true', help="Use ego IDs in GNN training")
+    parser.add_argument("--fl", action='store_true', help="Use federated learning in GNN training")
 
     #Model parameters
     parser.add_argument("--batch_size", default=8192, type=int, help="Select the batch size for GNN training")

@@ -152,14 +152,15 @@ def get_fl_data(partition_id:int, args, data_config):
     df_edges = pd.read_csv(transaction_file)
     df_edges = df_edges[df_edges['bankId_rank'] == partition_id]
     df_edges.drop(columns=['bankId_rank','bankId'], inplace=True)
-
     logging.info(f'Partition {partition_id}')
     logging.info(f'Available Edge Features: {df_edges.columns.tolist()}')
 
     df_edges['Timestamp'] = df_edges['Timestamp'] - df_edges['Timestamp'].min()
 
-    max_n_id = df_edges.loc[:, ['from_id', 'to_id']].to_numpy().max() + 1
-    df_nodes = pd.DataFrame({'NodeID': np.arange(max_n_id), 'Feature': np.ones(max_n_id)})
+    # Create nodes dataframe only for nodes that appear in this partition's edges
+    unique_nodes = pd.unique(df_edges[['from_id', 'to_id']].values.ravel())
+    df_nodes = pd.DataFrame({'NodeID': unique_nodes, 'Feature': np.ones(len(unique_nodes))})
+    
     timestamps = torch.Tensor(df_edges['Timestamp'].to_numpy())
     y = torch.LongTensor(df_edges['Is Laundering'].to_numpy())
 
@@ -173,7 +174,14 @@ def get_fl_data(partition_id:int, args, data_config):
     logging.info(f'Edge features being used: {edge_features}')
     logging.info(f'Node features being used: {node_features} ("Feature" is a placeholder feature of all 1s)')
 
+    # Create node feature tensor only for nodes in this partition
     x = torch.tensor(df_nodes.loc[:, node_features].to_numpy()).float()
+    
+    # Remap node IDs to be consecutive starting from 0
+    node_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_nodes)}
+    df_edges['from_id'] = df_edges['from_id'].map(node_id_map)
+    df_edges['to_id'] = df_edges['to_id'].map(node_id_map)
+    
     edge_index = torch.LongTensor(df_edges.loc[:, ['from_id', 'to_id']].to_numpy().T)
     edge_attr = torch.tensor(df_edges.loc[:, edge_features].to_numpy()).float()
 
@@ -230,19 +238,47 @@ def get_fl_data(partition_id:int, args, data_config):
     logging.info(f"Total test samples: {te_inds.shape[0] / y.shape[0] * 100 :.2f}% || IR: "
         f"{y[te_inds].float().mean() * 100:.2f}% || Test days: {split[2][:5]}")
     
-    #Creating the final data objects
-    tr_x, val_x, te_x = x, x, x
-    e_tr = tr_inds.numpy()
-    e_val = np.concatenate([tr_inds, val_inds])
+    # Split data into train/val/test sets
+    tr_x, val_x, te_x = x.clone(), x.clone(), x.clone()
 
-    tr_edge_index,  tr_edge_attr,  tr_y,  tr_edge_times  = edge_index[:,e_tr],  edge_attr[e_tr],  y[e_tr],  timestamps[e_tr]
-    val_edge_index, val_edge_attr, val_y, val_edge_times = edge_index[:,e_val], edge_attr[e_val], y[e_val], timestamps[e_val]
-    te_edge_index,  te_edge_attr,  te_y,  te_edge_times  = edge_index,          edge_attr,        y,        timestamps
+    # Adjust the indices to be within the range of available edges in this partition
+    tr_inds = tr_inds[tr_inds < len(timestamps)]
+    val_inds = val_inds[val_inds < len(timestamps)]
+    te_inds = te_inds[te_inds < len(timestamps)]
 
-    tr_data = GraphData (x=tr_x,  y=tr_y,  edge_index=tr_edge_index,  edge_attr=tr_edge_attr,  timestamps=tr_edge_times )
+    # Create edge indices relative to the current partition's edges
+    tr_edge_index = edge_index[:, tr_inds]
+    val_edge_index = edge_index[:, torch.cat([tr_inds, val_inds])]  # Include all edges up to validation
+    te_edge_index = edge_index  # Include all edges
+
+    tr_edge_attr = edge_attr[tr_inds]
+    val_edge_attr = edge_attr[torch.cat([tr_inds, val_inds])]
+    te_edge_attr = edge_attr
+
+    tr_edge_times = timestamps[tr_inds]
+    val_edge_times = timestamps[torch.cat([tr_inds, val_inds])]
+    te_edge_times = timestamps
+
+    tr_y = y[tr_inds]
+    val_y = y[torch.cat([tr_inds, val_inds])]
+    te_y = y
+
+    # Adjust validation indices to be relative to the validation data
+    val_inds = torch.arange(len(tr_inds), len(tr_inds) + len(val_inds))
+    # Adjust test indices to be relative to all data
+    te_inds = torch.arange(len(timestamps))
+
+    # Creating the final data objects
+    tr_data = GraphData(x=tr_x, y=tr_y, edge_index=tr_edge_index, edge_attr=tr_edge_attr, timestamps=tr_edge_times)
     val_data = GraphData(x=val_x, y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times)
-    te_data = GraphData (x=te_x,  y=te_y,  edge_index=te_edge_index,  edge_attr=te_edge_attr,  timestamps=te_edge_times )
+    te_data = GraphData(x=te_x, y=te_y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
 
+    # Create heterogeneous data if reverse message passing is enabled
+    if args.reverse_mp:
+        tr_data = create_hetero_obj(tr_data.x, tr_data.y, tr_data.edge_index, tr_data.edge_attr, tr_data.timestamps, args)
+        val_data = create_hetero_obj(val_data.x, val_data.y, val_data.edge_index, val_data.edge_attr, val_data.timestamps, args)
+        te_data = create_hetero_obj(te_data.x, te_data.y, te_data.edge_index, te_data.edge_attr, te_data.timestamps, args)
+    
     #Adding ports and time-deltas if applicable
     if args.ports:
         logging.info(f"Start: adding ports")
@@ -256,25 +292,19 @@ def get_fl_data(partition_id:int, args, data_config):
         val_data.add_time_deltas()
         te_data.add_time_deltas()
         logging.info(f"Done: adding time-deltas")
-    
-    #Normalize data
-    tr_data.x = val_data.x = te_data.x = z_norm(tr_data.x)
-    if not args.model == 'rgcn':
-        tr_data.edge_attr, val_data.edge_attr, te_data.edge_attr = z_norm(tr_data.edge_attr), z_norm(val_data.edge_attr), z_norm(te_data.edge_attr)
-    else:
-        tr_data.edge_attr[:, :-1], val_data.edge_attr[:, :-1], te_data.edge_attr[:, :-1] = z_norm(tr_data.edge_attr[:, :-1]), z_norm(val_data.edge_attr[:, :-1]), z_norm(te_data.edge_attr[:, :-1])
 
-    #Create heterogenous if reverese MP is enabled
-    #TODO: if I observe wierd behaviour, maybe add .detach.clone() to all torch tensors, but I don't think they're attached to any computation graph just yet
-    if args.reverse_mp:
-        tr_data = create_hetero_obj(tr_data.x,  tr_data.y,  tr_data.edge_index,  tr_data.edge_attr, tr_data.timestamps, args)
-        val_data = create_hetero_obj(val_data.x,  val_data.y,  val_data.edge_index,  val_data.edge_attr, val_data.timestamps, args)
-        te_data = create_hetero_obj(te_data.x,  te_data.y,  te_data.edge_index,  te_data.edge_attr, te_data.timestamps, args)
-    
     logging.info(f'train data object: {tr_data}')
     logging.info(f'validation data object: {val_data}')
     logging.info(f'test data object: {te_data}')
-    
-    val_inds = val_inds[val_inds < val_data['node', 'to', 'node'].edge_index.shape[1]]
 
     return tr_data, val_data, te_data, tr_inds, val_inds, te_inds
+
+
+
+
+
+
+
+
+
+

@@ -63,29 +63,47 @@ def add_arange_ids(data_list):
 
 def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform, args):
     if isinstance(tr_data, HeteroData):
-        tr_edge_label_index = tr_data['node', 'to', 'node'].edge_index
-        tr_edge_label = tr_data['node', 'to', 'node'].y
+        # Get edge indices and labels for the training set
+        tr_edge_label_index = tr_data['node', 'to', 'node'].edge_index[:, :len(tr_inds)]
+        tr_edge_label = tr_data['node', 'to', 'node'].y[:len(tr_inds)]
 
+        # Create training loader with proper edge subset
+        tr_loader = LinkNeighborLoader(
+            data=tr_data,
+            num_neighbors=args.num_neighs,
+            edge_label_index=(('node', 'to', 'node'), tr_edge_label_index),
+            edge_label=tr_edge_label,
+            batch_size=args.batch_size,
+            shuffle=True,
+            transform=transform
+        )
 
-        tr_loader =  LinkNeighborLoader(tr_data, num_neighbors=args.num_neighs, 
-                                    edge_label_index=(('node', 'to', 'node'), tr_edge_label_index), 
-                                    edge_label=tr_edge_label, batch_size=args.batch_size, shuffle=True, transform=transform)
-        
-        val_edge_label_index = val_data['node', 'to', 'node'].edge_index[:,val_inds]
+        # Similar adjustments for validation and test loaders
+        val_edge_label_index = val_data['node', 'to', 'node'].edge_index[:, val_inds]
         val_edge_label = val_data['node', 'to', 'node'].y[val_inds]
 
+        val_loader = LinkNeighborLoader(
+            data=val_data,
+            num_neighbors=args.num_neighs,
+            edge_label_index=(('node', 'to', 'node'), val_edge_label_index),
+            edge_label=val_edge_label,
+            batch_size=args.batch_size,
+            shuffle=False,
+            transform=transform
+        )
 
-        val_loader =  LinkNeighborLoader(val_data, num_neighbors=args.num_neighs, 
-                                    edge_label_index=(('node', 'to', 'node'), val_edge_label_index), 
-                                    edge_label=val_edge_label, batch_size=args.batch_size, shuffle=False, transform=transform)
-        
-        te_edge_label_index = te_data['node', 'to', 'node'].edge_index[:,te_inds]
+        te_edge_label_index = te_data['node', 'to', 'node'].edge_index[:, te_inds]
         te_edge_label = te_data['node', 'to', 'node'].y[te_inds]
 
-
-        te_loader =  LinkNeighborLoader(te_data, num_neighbors=args.num_neighs, 
-                                    edge_label_index=(('node', 'to', 'node'), te_edge_label_index), 
-                                    edge_label=te_edge_label, batch_size=args.batch_size, shuffle=False, transform=transform)
+        te_loader = LinkNeighborLoader(
+            data=te_data,
+            num_neighbors=args.num_neighs,
+            edge_label_index=(('node', 'to', 'node'), te_edge_label_index),
+            edge_label=te_edge_label,
+            batch_size=args.batch_size,
+            shuffle=False,
+            transform=transform
+        )
     else:
         tr_loader =  LinkNeighborLoader(tr_data, num_neighbors=args.num_neighs, batch_size=args.batch_size, shuffle=True, transform=transform)
         val_loader = LinkNeighborLoader(val_data,num_neighbors=args.num_neighs, edge_label_index=val_data.edge_index[:, val_inds],

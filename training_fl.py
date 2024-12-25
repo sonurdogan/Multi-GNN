@@ -13,6 +13,7 @@ from torch_geometric.nn import to_hetero, summary
 from sklearn.metrics import f1_score
 from torch_geometric.data import Data, HeteroData
 from data_loading import get_data
+from models import GINe
 
 import flwr
 from flwr.client import Client, ClientApp, NumPyClient
@@ -20,7 +21,6 @@ from flwr.common import Metrics, Context
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.server.strategy import FedAvg
 from flwr.simulation import run_simulation
-from flwr_datasets import FederatedDataset
 
 def train_fl_gnn(args, data_config):
     NUM_CLIENTS = 10
@@ -43,6 +43,7 @@ def train_fl_gnn(args, data_config):
             "final_dropout": extract_param("final_dropout", args),
             "n_heads": extract_param("n_heads", args) if args.model == 'gat' else None
         }
+    
     class DictToObj:
         def __init__(self, dictionary):
             self.__dict__.update(dictionary)
@@ -50,12 +51,26 @@ def train_fl_gnn(args, data_config):
     wandb_config = DictToObj(config)
     
 
-
     def set_parameters(net, parameters: List[np.ndarray]):
-        params_dict = zip(net.state_dict().keys(), parameters)
-        state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
-        net.load_state_dict(state_dict, strict=True)
-        #net.load_state_dict(state_dict, strict=False)
+        try:
+            params_dict = zip(net.state_dict().keys(), parameters)
+            state_dict = OrderedDict()
+            
+            # Convert parameters to tensors and handle potential shape mismatches
+            for k, v in params_dict:
+                if v.size > 0:  # Only add non-empty parameters
+                    tensor = torch.tensor(v)
+                    if tensor.shape != net.state_dict()[k].shape:
+                        print(f"Warning: Shape mismatch for {k}. Expected {net.state_dict()[k].shape}, got {tensor.shape}")
+                        continue
+                    state_dict[k] = tensor
+            
+            # Load with partial state dict
+            net.load_state_dict(state_dict, strict=False)
+            
+        except Exception as e:
+            print(f"Error in set_parameters: {str(e)}")
+            raise
 
 
     def get_parameters(net) -> List[np.ndarray]:
@@ -87,7 +102,7 @@ def train_fl_gnn(args, data_config):
 
             if args.reverse_mp:
                 train_fl_hetero(self.trainloader, self.valloader, self.testloader, self.tr_inds, self.val_inds, self.te_inds, self.net, self.optimizer, self.loss_fn, self.args,self.wandb_config,self.device, self.val_data, self.te_data, self.data_config)
-                
+
             else:
                 train_fl_homo(self.trainloader, self.valloader, self.testloader, self.tr_inds, self.val_inds, self.te_inds, self.net, self.optimizer, self.loss_fn, self.args,self.wandb_config,self.device, self.val_data, self.te_data, self.data_config)
 
@@ -100,7 +115,7 @@ def train_fl_gnn(args, data_config):
             else:
                 f1 = evaluate_homo(self.testloader, self.te_inds,self.net, self.te_data, self.device, self.args)
             
-            return len(self.valloader), {"f1": float(f1)}
+            return float(f1), len(self.valloader), {"f1": float(f1)}
 
 
     def client_fn(context: Context) -> Client:
@@ -112,7 +127,6 @@ def train_fl_gnn(args, data_config):
 
         partition_id = context.node_config["partition-id"]
 
-        tr_data, val_data, te_data, tr_inds, val_inds, te_inds = get_data(args, data_config)
 
         if args.ego:
             transform = AddEgoIds()
@@ -120,11 +134,14 @@ def train_fl_gnn(args, data_config):
             transform = None
 
         #add the unique ids to later find the seed edges
+
+        trainloader, valloader, testloader, tr_data, val_data, te_data, tr_inds, val_inds, te_inds = get_fl_loaders(partition_id, args, data_config)
+        
         add_arange_ids([tr_data, val_data, te_data])
 
-        tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform, args)
+        sample_batch = next(iter(trainloader))
+        sample_batch.to(DEVICE)
 
-        sample_batch = next(iter(tr_loader))
         net = get_model(sample_batch, wandb_config, args)
 
         if args.reverse_mp:
@@ -149,9 +166,6 @@ def train_fl_gnn(args, data_config):
         # Create a single Flower client representing a single organization
         # FlowerClient is a subclass of NumPyClient, so we need to call .to_client()
         # to convert it to a subclass of `flwr.client.Client`
-        trainloader, valloader, testloader = get_fl_loaders(partition_id, args, data_config)
-
-        tr_data, val_data, te_data, tr_inds, val_inds, te_inds = get_fl_data(partition_id, args, data_config)
 
         return FlowerClient(net, trainloader, valloader, testloader, tr_inds, val_inds, te_inds, optimizer, loss_fn, args, wandb_config, DEVICE, val_data,te_data, data_config ).to_client()
 
@@ -211,12 +225,10 @@ def train_fl_gnn(args, data_config):
         num_supernodes=NUM_CLIENTS,
         backend_config=backend_config,
     )
-
-
-
 def train_fl_homo(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds, model, optimizer, loss_fn, args, config, device, val_data,te_data,  data_config):
     #training
     best_val_f1 = 0
+    model.train()
     for epoch in range(config.epochs):
         total_loss = total_examples = 0
         preds = []
@@ -270,22 +282,30 @@ def train_fl_homo(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds, 
 def train_fl_hetero(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds, model, optimizer, loss_fn, args, config, device, val_data,te_data,  data_config):
     #training
     best_val_f1 = 0
+    model.train()
+    
     for epoch in range(config.epochs):
         total_loss = total_examples = 0
         preds = []
         ground_truths = []
         for batch in tqdm.tqdm(tr_loader, disable=not args.tqdm):
             optimizer.zero_grad()
-            #select the seed edges from which the batch was created
+            # Get the indices for the current batch
             inds = tr_inds.detach().cpu()
             batch_edge_inds = inds[batch['node', 'to', 'node'].input_id.detach().cpu()]
-            batch_edge_ids = tr_loader.data['node', 'to', 'node'].edge_attr.detach().cpu()[batch_edge_inds, 0]
+            
+            # Important: Ensure indices are within bounds
+            batch_edge_inds = batch_edge_inds[batch_edge_inds < tr_loader.data['node', 'to', 'node'].edge_attr.size(0)]
+            
+            # Get edge IDs safely
+            batch_edge_ids = tr_loader.data['node', 'to', 'node'].edge_attr[batch_edge_inds, 0]
             mask = torch.isin(batch['node', 'to', 'node'].edge_attr[:, 0].detach().cpu(), batch_edge_ids)
             
             #remove the unique edge id from the edge features, as it's no longer needed
             batch['node', 'to', 'node'].edge_attr = batch['node', 'to', 'node'].edge_attr[:, 1:]
             batch['node', 'rev_to', 'node'].edge_attr = batch['node', 'rev_to', 'node'].edge_attr[:, 1:]
 
+            
             batch.to(device)
             out = model(batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict)
             out = out[('node', 'to', 'node')]
@@ -305,19 +325,3 @@ def train_fl_hetero(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds
         ground_truth = torch.cat(ground_truths, dim=0).detach().cpu().numpy()
         f1 = f1_score(ground_truth, pred)
         print(f'Train F1: {f1:.4f}')
-
-        #evaluate
-        val_f1 = evaluate_hetero(val_loader, val_inds, model, val_data, device, args)
-        te_f1 = evaluate_hetero(te_loader, te_inds, model, te_data, device, args)
-
-        
-        print(f'Validation F1: {val_f1:.4f}')
-        print(f'Test F1: {te_f1:.4f}')
-
-        if epoch == 0:
-            continue
-        elif val_f1 > best_val_f1:
-            best_val_f1 = val_f1
-            if args.save_model:
-                save_model(model, optimizer, epoch, args, data_config)
-        

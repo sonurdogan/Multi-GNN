@@ -14,4 +14,4 @@ def get_fl_loaders(partition_id: int, args, data_config):
 
     tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform, args)
 
-    return tr_loader, val_loader, te_loader
+    return tr_loader, val_loader, te_loader, tr_data, val_data, te_data, tr_inds, val_inds, te_inds

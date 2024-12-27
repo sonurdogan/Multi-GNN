@@ -14,22 +14,28 @@ from sklearn.metrics import f1_score
 from torch_geometric.data import Data, HeteroData
 from data_loading import get_data
 from models import GINe
-
-import flwr
-from flwr.client import Client, ClientApp, NumPyClient
-from flwr.common import Metrics, Context
-from flwr.server import ServerApp, ServerConfig, ServerAppComponents
-from flwr.server.strategy import FedAvg
-from flwr.simulation import run_simulation
 from util import logger_setup
 logger_setup()
+from sklearn.metrics import precision_score, recall_score
 
-def train_fl_hetero(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds, model, optimizer, loss_fn, args, wandb_config, device, val_data, te_data, data_config):
+import json
+from util import create_parser
+
+parser = create_parser()
+args = parser.parse_args()
+
+with open('data_config.json', 'r') as config_file:
+    data_config = json.load(config_file)
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+def train_ind_hetero(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds, model, optimizer, loss_fn, args, config, device, val_data,te_data,  data_config):
     #training
     best_val_f1 = 0
     model.train()
     
-    for epoch in range(wandb_config.epochs):
+    for epoch in range(config.epochs):
         total_loss = total_examples = 0
         preds = []
         ground_truths = []
@@ -69,34 +75,14 @@ def train_fl_hetero(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds
         pred = torch.cat(preds, dim=0).detach().cpu().numpy()
         ground_truth = torch.cat(ground_truths, dim=0).detach().cpu().numpy()
         f1 = f1_score(ground_truth, pred)
+        #calculate precision, recall
+
+        precision = precision_score(ground_truth, pred, average='binary')
+        recall = recall_score(ground_truth, pred, average='binary') 
+        print(f"Precision: {precision:.4f}, Recall: {recall:.4f}")
+
+        print(f"Training Loss:", total_loss/total_examples)
         print(f'Train F1: {f1:.4f}')
-
-        #evaluate
-        val_f1 = evaluate_hetero(val_loader, val_inds, model, val_data, device, args)
-        te_f1 = evaluate_hetero(te_loader, te_inds, model, te_data, device, args)
-
-        
-        print(f'Validation F1: {val_f1:.4f}')
-        print(f'Test F1: {te_f1:.4f}')
-
-        if epoch == 0:
-            continue
-        elif val_f1 > best_val_f1:
-            best_val_f1 = val_f1
-            if args.save_model:
-                save_model(model, optimizer, epoch, args, data_config)
-
-import json
-from util import create_parser
-
-parser = create_parser()
-args = parser.parse_args()
-
-with open('data_config.json', 'r') as config_file:
-    data_config = json.load(config_file)
-
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 
 config={
@@ -123,32 +109,39 @@ class DictToObj:
 wandb_config = DictToObj(config)
 
 
-partition_id = 1
+partition_id = args.partition_id
 
-
-print("will run the get_fl data ")
+print("Running on partition", partition_id)
+print("Params:", wandb_config)
 
 trainloader, valloader, testloader, tr_data, val_data, te_data, tr_inds, val_inds, te_inds = get_fl_loaders(partition_id, args, data_config)
 
-print("got the data")
 sample_batch = next(iter(trainloader))
 sample_batch.to(DEVICE)
 
-
-n_feats = sample_batch.x.shape[1] if not isinstance(sample_batch, HeteroData) else sample_batch['node'].x.shape[1]
-e_dim = (sample_batch.edge_attr.shape[1] - 1) if not isinstance(sample_batch, HeteroData) else (sample_batch['node', 'to', 'node'].edge_attr.shape[1] - 1)
-        
-net = GINe(
-            num_features=n_feats, num_gnn_layers=wandb_config.n_gnn_layers, n_classes=2,
-            n_hidden=round(wandb_config.n_hidden), residual=False, edge_updates=args.emlps, edge_dim=e_dim, 
-            dropout=wandb_config.dropout, final_dropout=wandb_config.final_dropout
-).to(DEVICE)
+net = get_model(sample_batch, wandb_config, args)
 
 if args.reverse_mp:
     net = to_hetero(net, te_data.metadata(), aggr='mean')
 
+net.to(DEVICE)
 optimizer = torch.optim.Adam(net.parameters(), lr=wandb_config.lr)
+
+sample_x = sample_batch.x if not isinstance(sample_batch, HeteroData) else sample_batch.x_dict
+sample_edge_index = sample_batch.edge_index if not isinstance(sample_batch, HeteroData) else sample_batch.edge_index_dict
+
+if isinstance(sample_batch, HeteroData):
+    sample_batch['node', 'to', 'node'].edge_attr = sample_batch['node', 'to', 'node'].edge_attr[:, 1:]
+    sample_batch['node', 'rev_to', 'node'].edge_attr = sample_batch['node', 'rev_to', 'node'].edge_attr[:, 1:]
+else:
+    sample_batch.edge_attr = sample_batch.edge_attr[:, 1:]
+
+sample_edge_attr = sample_batch.edge_attr if not isinstance(sample_batch, HeteroData) else sample_batch.edge_attr_dict
+
+print(summary(net, sample_x, sample_edge_index, sample_edge_attr))
+
 loss_fn = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor([wandb_config.w_ce1, wandb_config.w_ce2]).to(DEVICE))
-print("read to train")
-train_fl_hetero(trainloader, valloader, testloader, tr_inds, val_inds, te_inds, net, optimizer, loss_fn, args, wandb_config,DEVICE, val_data, te_data, data_config)
-print("done training")
+
+train_ind_hetero(trainloader, valloader, testloader, tr_inds, val_inds, te_inds, net, optimizer, loss_fn, args, wandb_config,DEVICE, val_data, te_data, data_config)
+
+_ = evaluate_hetero(testloader, te_inds, net, te_data, DEVICE, args)

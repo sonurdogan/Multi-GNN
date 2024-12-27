@@ -151,7 +151,7 @@ def get_fl_data(partition_id:int, args, data_config):
     transaction_file = f"{data_config['paths']['aml_data']}/{args.data}/formatted_transactions_fl.csv" #replace this with your path to the respective AML data objects
     df_edges = pd.read_csv(transaction_file)
     df_edges = df_edges[df_edges['bankId_rank'] == partition_id]
-    df_edges.drop(columns=['bankId_rank','bankId'], inplace=True)
+    df_edges.drop(columns=['bankId_rank'], inplace=True)
     logging.info(f'Partition {partition_id}')
     logging.info(f'Available Edge Features: {df_edges.columns.tolist()}')
 
@@ -282,6 +282,7 @@ def get_fl_data(partition_id:int, args, data_config):
     #Adding ports and time-deltas if applicable
     if args.ports:
         logging.info(f"Start: adding ports")
+        print(f"Start: adding ports")
         tr_data.add_ports()
         val_data.add_ports()
         te_data.add_ports()
@@ -298,13 +299,3 @@ def get_fl_data(partition_id:int, args, data_config):
     logging.info(f'test data object: {te_data}')
 
     return tr_data, val_data, te_data, tr_inds, val_inds, te_inds
-
-
-
-
-
-
-
-
-
-

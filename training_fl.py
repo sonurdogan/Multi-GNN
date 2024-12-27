@@ -23,7 +23,8 @@ from flwr.server.strategy import FedAvg
 from flwr.simulation import run_simulation
 
 def train_fl_gnn(args, data_config):
-    NUM_CLIENTS = 10
+    NUM_CLIENTS = args.n_banks
+    NUM_ROUNDS = args.n_rounds
 
     DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -111,7 +112,7 @@ def train_fl_gnn(args, data_config):
         def evaluate(self, parameters, config):
             set_parameters(self.net, parameters)
             if args.reverse_mp:
-                f1 = evaluate_hetero(self.testloader, self.te_inds,self.net, self.te_data, self.device, self.args) #f1'nı dene
+                f1 = evaluate_hetero(self.testloader, self.te_inds,self.net, self.te_data, self.device, self.args)
             else:
                 f1 = evaluate_homo(self.testloader, self.te_inds,self.net, self.te_data, self.device, self.args)
             
@@ -137,8 +138,6 @@ def train_fl_gnn(args, data_config):
 
         trainloader, valloader, testloader, tr_data, val_data, te_data, tr_inds, val_inds, te_inds = get_fl_loaders(partition_id, args, data_config)
         
-        add_arange_ids([tr_data, val_data, te_data])
-
         sample_batch = next(iter(trainloader))
         sample_batch.to(DEVICE)
 
@@ -202,15 +201,14 @@ def train_fl_gnn(args, data_config):
         # Create FedAvg strategy
         strategy = FedAvg(
             fraction_fit=1.0,
-            fraction_evaluate=0.5,
-            min_fit_clients=10,
-            min_evaluate_clients=5,
-            min_available_clients=10,
+            fraction_evaluate=30,
+            min_fit_clients=30,
+            min_evaluate_clients=30,
+            min_available_clients=30,
             evaluate_metrics_aggregation_fn=weighted_average,  
         )
 
-        # Configure the server for 5 rounds of training
-        config = ServerConfig(num_rounds=5)
+        config = ServerConfig(num_rounds=NUM_ROUNDS)
 
         return ServerAppComponents(strategy=strategy, config=config)
 

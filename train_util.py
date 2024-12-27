@@ -204,6 +204,7 @@ def evaluate_hetero(loader, inds, model, data, device, args):
     pred = torch.cat(preds, dim=0).cpu().numpy()
     ground_truth = torch.cat(ground_truths, dim=0).cpu().numpy()
     f1 = f1_score(ground_truth, pred)
+    print("Test F1:", f1)
 
     return f1
 

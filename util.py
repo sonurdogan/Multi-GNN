@@ -35,6 +35,9 @@ def create_parser():
     parser.add_argument("--batch_size", default=8192, type=int, help="Select the batch size for GNN training")
     parser.add_argument("--n_epochs", default=100, type=int, help="Select the number of epochs for GNN training")
     parser.add_argument('--num_neighs', nargs='+', default=[100,100], help='Pass the number of neighors to be sampled in each hop (descending).')
+    parser.add_argument("--n_banks", default=30, type=int, help="Number of banks in the FL dataset")
+    parser.add_argument("--n_rounds", default=5, type=int, help="Number of rounds in the FL training")
+    parser.add_argument("--partition_id", default=0, type=int, help="Partition ID for the individual bank training")
 
     #Misc
     parser.add_argument("--seed", default=1, type=int, help="Select the random seed for reproducability")

@@ -281,7 +281,7 @@ def train_fl_hetero(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds
     #training
     best_val_f1 = 0
     model.train()
-    
+    print(f"Training for {config.epochs} epochs")
     for epoch in range(config.epochs):
         total_loss = total_examples = 0
         preds = []

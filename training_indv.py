@@ -112,7 +112,7 @@ wandb_config = DictToObj(config)
 partition_id = args.partition_id
 
 print("Running on partition", partition_id)
-print("Params:", wandb_config)
+print("Params:", config)
 
 trainloader, valloader, testloader, tr_data, val_data, te_data, tr_inds, val_inds, te_inds = get_fl_loaders(partition_id, args, data_config)
 

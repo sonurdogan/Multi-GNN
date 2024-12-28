@@ -1,11 +1,12 @@
 import torch
 import tqdm
 from sklearn.metrics import f1_score
-from train_util import AddEgoIds, extract_param, add_arange_ids, get_loaders, evaluate_homo, evaluate_hetero, save_model, load_model
+from train_util import AddEgoIds, AddInDegreeCentrality, AddOutDegreeCentrality,AddPageRankCentrality, extract_param, add_arange_ids, get_loaders, evaluate_homo, evaluate_hetero, save_model, load_model
 from models import GINe, PNA, GATe, RGCN
 from torch_geometric.data import Data, HeteroData
 from torch_geometric.nn import to_hetero, summary
 from torch_geometric.utils import degree
+from torch_geometric.transforms import Compose
 import wandb
 import logging
 
@@ -193,15 +194,25 @@ def train_gnn(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, args, data
     config = wandb.config
 
     #set the transform if ego ids should be used
-    if args.ego:
-        transform = AddEgoIds()
+    if args.ego or args.centrality:
+        transform_l=[]
+        if args.ego:
+            transform_l.append(AddEgoIds())
+        if args.centrality:
+            transform_l.append(AddPageRankCentrality())
+            transform_l.append(AddInDegreeCentrality())
+            transform_l.append(AddOutDegreeCentrality())
+        
+        combined_transform = Compose(
+            transform_l
+            )
     else:
-        transform = None
+        combined_transform = None
 
     #add the unique ids to later find the seed edges
     add_arange_ids([tr_data, val_data, te_data])
-
-    tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform, args)
+    print("Applying transform")
+    tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, combined_transform, args)
 
     #get the model
     sample_batch = next(iter(tr_loader))

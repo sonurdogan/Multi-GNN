@@ -4,6 +4,8 @@ from torch_geometric.transforms import BaseTransform
 from typing import Union
 from torch_geometric.data import Data, HeteroData
 from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.utils import to_networkx
+import networkx as nx
 from sklearn.metrics import f1_score
 import json
 
@@ -28,7 +30,71 @@ class AddEgoIds(BaseTransform):
             data['node'].x = torch.cat([x, ids], dim=1)
         
         return data
+class AddInDegreeCentrality(BaseTransform):
+    r"""Add IDs to the centre nodes of the batch.
+    """
+    def __init__(self):
+        pass
 
+    def __call__(self, data: Union[Data, HeteroData]):
+        x = data.x if not isinstance(data, HeteroData) else data['node'].x
+        device = x.device
+
+        G = to_networkx(data, to_undirected=False)
+        in_degree = nx.in_degree_centrality(G)
+        in_degree_values = torch.tensor(list(in_degree.values()), dtype=torch.float, device=device)
+        in_degree_values = in_degree_values.unsqueeze(1)
+
+        if not isinstance(data, HeteroData):
+            data.x = torch.cat([x, in_degree_values], dim=1)
+        else: 
+            data['node'].x = torch.cat([x, in_degree_values], dim=1)
+        
+        return data
+
+class AddOutDegreeCentrality(BaseTransform):
+    r"""Add IDs to the centre nodes of the batch.
+    """
+    def __init__(self):
+        pass
+
+    def __call__(self, data: Union[Data, HeteroData]):
+        x = data.x if not isinstance(data, HeteroData) else data['node'].x
+        device = x.device
+
+        G = to_networkx(data, to_undirected=False)
+        out_degree = nx.out_degree_centrality(G)
+        out_degree_values = torch.tensor(list(out_degree.values()), dtype=torch.float, device=device)
+        out_degree_values = out_degree_values.unsqueeze(1)
+
+        if not isinstance(data, HeteroData):
+            data.x = torch.cat([x, out_degree_values], dim=1)
+        else: 
+            data['node'].x = torch.cat([x, out_degree_values], dim=1)
+        
+        return data
+    
+class AddPageRankCentrality(BaseTransform):
+    
+    def __init__(self):
+        pass
+
+    def __call__(self, data: Union[Data, HeteroData]):
+        x = data.x if not isinstance(data, HeteroData) else data['node'].x
+        device = x.device
+
+        G = to_networkx(data, to_undirected=False)
+        pagerank = nx.pagerank(G)
+        pagerank_values = torch.tensor(list(pagerank.values()), dtype=torch.float)
+        pagerank_values = pagerank_values.unsqueeze(1) 
+
+        if not isinstance(data, HeteroData):
+            data.x = torch.cat([x, pagerank_values], dim=1)
+        else: 
+            data['node'].x = torch.cat([x, pagerank_values], dim=1)
+        
+        return data
+    
 def extract_param(parameter_name: str, args) -> float:
     """
     Extract the value of the specified parameter for the given model.

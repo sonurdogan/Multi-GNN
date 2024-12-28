@@ -12,9 +12,14 @@ def get_data(args, data_config):
     2. The data is split into training, validation and test data.
     3. PyG Data objects are created with the respective data splits.
     '''
-
-    transaction_file = f"{data_config['paths']['aml_data']}/{args.data}/formatted_transactions.csv" #replace this with your path to the respective AML data objects
-    df_edges = pd.read_csv(transaction_file)
+    if args.fl:
+        transaction_file = f"{data_config['paths']['aml_data']}/{args.data}/formatted_transactions_fl.csv" #replace this with your path to the respective AML data objects
+        df_edges = pd.read_csv(transaction_file)
+        df_edges.drop(columns=['bankId_rank'], inplace=True)
+        
+    else:
+        transaction_file = f"{data_config['paths']['aml_data']}/{args.data}/formatted_transactions.csv" #replace this with your path to the respective AML data objects
+        df_edges = pd.read_csv(transaction_file)
 
     logging.info(f'Available Edge Features: {df_edges.columns.tolist()}')
 
@@ -152,7 +157,7 @@ def get_fl_data(partition_id:int, args, data_config):
     df_edges = pd.read_csv(transaction_file)
     df_edges = df_edges[df_edges['bankId_rank'] == partition_id]
     df_edges.drop(columns=['bankId_rank'], inplace=True)
-    logging.info(f'Partition {partition_id}')
+    print(f'Partition {partition_id}')
     logging.info(f'Available Edge Features: {df_edges.columns.tolist()}')
 
     df_edges['Timestamp'] = df_edges['Timestamp'] - df_edges['Timestamp'].min()
@@ -163,7 +168,7 @@ def get_fl_data(partition_id:int, args, data_config):
     
     timestamps = torch.Tensor(df_edges['Timestamp'].to_numpy())
     y = torch.LongTensor(df_edges['Is Laundering'].to_numpy())
-
+    print(y)
     logging.info(f"Illicit ratio = {sum(y)} / {len(y)} = {sum(y) / len(y) * 100:.2f}%")
     logging.info(f"Number of nodes (holdings doing transcations) = {df_nodes.shape[0]}")
     logging.info(f"Number of transactions = {df_edges.shape[0]}")

@@ -67,6 +67,14 @@ def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transfor
         tr_edge_label_index = tr_data['node', 'to', 'node'].edge_index[:, :len(tr_inds)]
         tr_edge_label = tr_data['node', 'to', 'node'].y[:len(tr_inds)]
 
+        # Remove the ID column from edge attributes before creating the loader
+        tr_data['node', 'to', 'node'].edge_attr = tr_data['node', 'to', 'node'].edge_attr[:, 1:]
+        tr_data['node', 'rev_to', 'node'].edge_attr = tr_data['node', 'rev_to', 'node'].edge_attr[:, 1:]
+        val_data['node', 'to', 'node'].edge_attr = val_data['node', 'to', 'node'].edge_attr[:, 1:]
+        val_data['node', 'rev_to', 'node'].edge_attr = val_data['node', 'rev_to', 'node'].edge_attr[:, 1:]
+        te_data['node', 'to', 'node'].edge_attr = te_data['node', 'to', 'node'].edge_attr[:, 1:]
+        te_data['node', 'rev_to', 'node'].edge_attr = te_data['node', 'rev_to', 'node'].edge_attr[:, 1:]
+
         # Create training loader with proper edge subset
         tr_loader = LinkNeighborLoader(
             data=tr_data,
@@ -105,10 +113,15 @@ def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transfor
             transform=transform
         )
     else:
-        tr_loader =  LinkNeighborLoader(tr_data, num_neighbors=args.num_neighs, batch_size=args.batch_size, shuffle=True, transform=transform)
-        val_loader = LinkNeighborLoader(val_data,num_neighbors=args.num_neighs, edge_label_index=val_data.edge_index[:, val_inds],
+        # Remove the ID column from edge attributes before creating the loader
+        tr_data.edge_attr = tr_data.edge_attr[:, 1:]
+        val_data.edge_attr = val_data.edge_attr[:, 1:]
+        te_data.edge_attr = te_data.edge_attr[:, 1:]
+
+        tr_loader = LinkNeighborLoader(tr_data, num_neighbors=args.num_neighs, batch_size=args.batch_size, shuffle=True, transform=transform)
+        val_loader = LinkNeighborLoader(val_data, num_neighbors=args.num_neighs, edge_label_index=val_data.edge_index[:, val_inds],
                                         edge_label=val_data.y[val_inds], batch_size=args.batch_size, shuffle=False, transform=transform)
-        te_loader =  LinkNeighborLoader(te_data,num_neighbors=args.num_neighs, edge_label_index=te_data.edge_index[:, te_inds],
+        te_loader = LinkNeighborLoader(te_data, num_neighbors=args.num_neighs, edge_label_index=te_data.edge_index[:, te_inds],
                                 edge_label=te_data.y[te_inds], batch_size=args.batch_size, shuffle=False, transform=transform)
         
     return tr_loader, val_loader, te_loader

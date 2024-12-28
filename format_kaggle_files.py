@@ -135,27 +135,18 @@ bank_clusters = cluster_banks(data, "FromBank", 10)
 
 data["bankId"] = data["FromBank"]
 
-different_banks = data[data["FromBank"] != data["ToBank"]]
-
-duplicated_rows = different_banks.copy()
-duplicated_rows["bankId"] = duplicated_rows["ToBank"]
-
-result = pd.concat([data, duplicated_rows], ignore_index=True).sort_values(by=["EdgeID", "bankId"]).reset_index(drop=True)
-data = result
-
-# add bank clusters and store in a new column bankId_rank
 data["bankId_rank"] = data["bankId"].map(bank_clusters)
 
 bank_to_cluster = {bank: cluster_num for cluster_num, banks in bank_clusters.items() for bank in banks}
 data["bankId_rank"] = data["bankId"].map(bank_to_cluster)
 
-#if it is in the same cluster, we can would have duplicates
-data =data.drop(columns=["bankId"])
-data = data.drop_duplicates()
+data =data.drop(columns=["bankId","FromBank", "ToBank"])
 
-#remove from bank and to bank
-data = data.drop(columns=["FromBank", "ToBank"])
+mapping_ranks = {rank: i for i, rank in enumerate(data["bankId_rank"].unique())}
 
+data["bankId_rank"] = data["bankId_rank"].map(mapping_ranks)
+
+print("Unique partitions after clustering: ", data["bankId_rank"].unique())
 
 fl_outPath = os.path.dirname(inPath) + "/formatted_transactions_fl.csv"
 data.to_csv(fl_outPath, index=False)

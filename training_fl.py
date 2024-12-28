@@ -135,10 +135,15 @@ def train_fl_gnn(args, data_config):
             transform = None
 
         #add the unique ids to later find the seed edges
+        global_tr_data, global_val_data, global_te_data, global_tr_inds, global_val_inds, global_te_inds = get_data(args, data_config)
+        
+        add_arange_ids([global_tr_data, global_val_data, global_te_data])
+
+        global_tr_loader, global_val_loader, global_te_loader = get_loaders(global_tr_data, global_val_data, global_te_data, global_tr_inds, global_val_inds, global_te_inds, transform, args)
 
         trainloader, valloader, testloader, tr_data, val_data, te_data, tr_inds, val_inds, te_inds = get_fl_loaders(partition_id, args, data_config)
         
-        sample_batch = next(iter(trainloader))
+        sample_batch = next(iter(global_tr_loader))
         sample_batch.to(DEVICE)
 
         net = get_model(sample_batch, wandb_config, args)
@@ -201,10 +206,10 @@ def train_fl_gnn(args, data_config):
         # Create FedAvg strategy
         strategy = FedAvg(
             fraction_fit=1.0,
-            fraction_evaluate=30,
-            min_fit_clients=30,
-            min_evaluate_clients=30,
-            min_available_clients=30,
+            fraction_evaluate=1.0,
+            min_fit_clients=NUM_CLIENTS,
+            min_evaluate_clients=NUM_CLIENTS,
+            min_available_clients=NUM_CLIENTS,
             evaluate_metrics_aggregation_fn=weighted_average,  
         )
 
